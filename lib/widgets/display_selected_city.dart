@@ -10,12 +10,6 @@ class DisplaySelectedCity extends StatefulWidget {
 
 class _DisplaySelectedCityState extends State<DisplaySelectedCity> {
   @override
-  void dispose() {
-    super.dispose();
-    cityNotifier.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.only(top: 50),

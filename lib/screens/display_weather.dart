@@ -1,14 +1,19 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:weather/models/weather.dart';
-import 'package:weather/notifiers/city_notifier.dart';
-import 'package:weather/notifiers/city_stream_controller.dart';
+import 'package:weather/screens/home.dart';
+import 'package:weather/sections/no_data_found.dart';
+import 'package:weather/sections/weather_card.dart';
+import 'package:weather/streams/city_stream_controller.dart';
+import 'package:weather/screens/astronomy.dart';
+import 'package:weather/streams/navigator_stream_controller.dart';
 import 'package:http/http.dart' as http;
 
 class DisplayWeather extends StatefulWidget {
-  const DisplayWeather({super.key});
+  const DisplayWeather({super.key, required this.city});
+  final String? city;
 
   @override
   State<DisplayWeather> createState() => _DisplayWeatherState();
@@ -17,19 +22,12 @@ class DisplayWeather extends StatefulWidget {
 class _DisplayWeatherState extends State<DisplayWeather> {
   late Location location;
   late CurrentWeather currWeather;
-  late WeatherCondition weatherCondition;
+  // late Stream? astronomyStream;
 
-  Future fetchData(String city) async {
-    final String endpoint =
-        "https://api.weatherapi.com/v1/current.json?key=aab02b8362e14d6e8bc61758232210&q=$city&aqi=no";
-    final data = await http.get(Uri.parse(endpoint));
-    final Map<String, dynamic> res = jsonDecode(data.body);
-    return res;
-  }
+  fetchData() async* {
+    Stream getStream = cityStreamController.stream.first.asStream();
 
-  Stream<Map<String, dynamic>> getStream() async* {
-    final String cityName = await cityStream.stream.first;
-    final Map<String, dynamic> res = await fetchData(cityName);
+    Map<String, dynamic> res = await getStream.first;
     location = Location.fromJson(res['location']);
     currWeather = CurrentWeather.fromJson(res['current']);
     yield res;
@@ -38,14 +36,69 @@ class _DisplayWeatherState extends State<DisplayWeather> {
   @override
   void dispose() {
     super.dispose();
-    cityStream.close();
-    cityStream = StreamController();
+    cityStreamController.close();
+  }
+
+  Future fetchAstronomyData(String city) async {
+    DateTime now = DateTime.now();
+    DateTime yesterday = now.subtract(const Duration(days: 1));
+    final String formattedDate = DateFormat('yyyy-MM-dd').format(yesterday);
+    final String endpoint =
+        "http://api.weatherapi.com/v1/astronomy.json?key=aab02b8362e14d6e8bc61758232210&q=$city&dt=$formattedDate";
+    final data = await http.get(Uri.parse(endpoint));
+    final Map<String, dynamic> res = jsonDecode(data.body);
+    return res;
+  }
+
+  void submit() {
+    navigationController.add(AstronomyDetailsScreen(
+      astronomyStream: Stream.fromFuture(fetchAstronomyData(widget.city ?? "")),
+    ));
+  }
+
+  Widget constructTableUsingStreamBuilder() {
+    return StreamBuilder(
+      stream: fetchData(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: LinearProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(
+                Color.fromARGB(255, 2, 62, 111),
+              ),
+            ),
+          );
+        }
+        if (snapshot.connectionState == ConnectionState.active ||
+            snapshot.connectionState == ConnectionState.done) {
+          if (snapshot.hasData) {
+            return InkWell(
+              onTap: () => submit(),
+              child: WeatherCard(
+                location: location,
+                currWeather: currWeather,
+              ),
+            );
+          }
+          if (snapshot.hasError) {
+            return const NoDataFound();
+          }
+        }
+        return const Text("Couldn't load data", style: TextStyle(fontSize: 18));
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leading: InkWell(
+          onTap: () => navigationController.add(const HomeScreen()),
+          child: const Icon(
+            Icons.arrow_back_ios,
+          ),
+        ),
         title: const Text(
           "Weather Details",
           style: TextStyle(
@@ -65,108 +118,7 @@ class _DisplayWeatherState extends State<DisplayWeather> {
         width: double.infinity,
         child: Column(
           children: <Widget>[
-            StreamBuilder(
-              stream: getStream(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(
-                    child: LinearProgressIndicator(
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        Color.fromARGB(255, 2, 62, 111),
-                      ),
-                    ),
-                  );
-                }
-                if (snapshot.connectionState == ConnectionState.active ||
-                    snapshot.connectionState == ConnectionState.done) {
-                  if (snapshot.hasData) {
-                    return Center(
-                      child: Container(
-                        margin: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 50,
-                        ),
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: Colors.grey,
-                          ),
-                        ),
-                        child: DataTable(
-                          columns: const [
-                            DataColumn(
-                              label: Text(
-                                "Property",
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                            DataColumn(
-                              label: Text(
-                                "Value",
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ],
-                          rows: [
-                            DataRow(cells: [
-                              const DataCell(Text("City Name")),
-                              DataCell(Text(location.name)),
-                            ]),
-                            DataRow(cells: [
-                              const DataCell(Text("Temperature (Celsius)")),
-                              DataCell(Text("${currWeather.tempC}")),
-                            ]),
-                            DataRow(cells: [
-                              const DataCell(Text("Wind (kph)")),
-                              DataCell(Text("${currWeather.windKph}")),
-                            ]),
-                            DataRow(cells: [
-                              const DataCell(Text("Pressure")),
-                              DataCell(Text("${currWeather.pressureIn}")),
-                            ]),
-                          ],
-                        ),
-                      ),
-                    );
-                  }
-                  if (snapshot.hasError) {
-                    return Center(
-                      child: Container(
-                        margin: const EdgeInsets.only(top: 40),
-                        child: const Column(
-                          children: [
-                            Text(
-                              "Oops... Couldn't fetch data",
-                              style: TextStyle(
-                                fontSize: 24,
-                                fontWeight: FontWeight.bold,
-                                color: Color.fromARGB(255, 153, 6, 6),
-                              ),
-                            ),
-                            SizedBox(
-                              height: 30,
-                            ),
-                            Icon(
-                              Icons.do_disturb_alt_outlined,
-                              size: 34,
-                              color: Color.fromARGB(255, 153, 6, 6),
-                            )
-                          ],
-                        ),
-                      ),
-                    );
-                  }
-                }
-                return const Text("Couldn't load data",
-                    style: TextStyle(fontSize: 18));
-              },
-            )
+            constructTableUsingStreamBuilder(),
           ],
         ),
       ),
